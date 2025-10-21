@@ -2,7 +2,7 @@ const CONFIG = {
     API_ENDPOINT: 'https://rjttx5p195.execute-api.eu-central-1.amazonaws.com/default/multiStep_form_Orchestrator',
     FINAL_SUBMISSION_ENDPOINT: 'https://gdi9c82r4j.execute-api.eu-west-1.amazonaws.com/moderate-test',
     POLLING_ENDPOINT: 'https://gdi9c82r4j.execute-api.eu-west-1.amazonaws.com/getitemstatus',
-    DEFAULT_BLUEPRINT: 'business-plan-v1',
+    DEFAULT_BLUEPRINT: 'gtmstrategy',
     MAX_FILE_SIZE: 10 * 1024 * 1024, // 10MB
     UPLOAD_TIMEOUT: 30000, // 30 seconds
     POLL_INTERVAL: 5000,
@@ -378,11 +378,9 @@ class MultiStepFormV4 {
     }
 
     /**
-     * Build final job data payload combining base fields and flattened answers
+     * Build final job data payload combining base fields only
      */
     buildFinalJobData() {
-        const flattenedAnswers = this.flattenAnswersForSubmission();
-
         const baseData = {
             user_id: this.userId,
             blueprint: this.blueprint,
@@ -392,73 +390,9 @@ class MultiStepFormV4 {
             answers: this.allAnswers
         };
 
-        return {
-            ...flattenedAnswers,
-            ...Object.fromEntries(
-                Object.entries(baseData).filter(([, value]) => value !== undefined)
-            )
-        };
-    }
-
-    /**
-     * Flatten collected answers into key/value pairs suitable for submission
-     */
-    flattenAnswersForSubmission() {
-        const entries = {};
-
-        this.allAnswers.forEach((answer, index) => {
-            const questionKey = this.slugifyQuestion(answer.question, index);
-
-            if (answer && answer.payload) {
-                Object.entries(answer.payload).forEach(([payloadKey, payloadValue]) => {
-                    const finalKey = `${questionKey}_${payloadKey}`;
-                    entries[finalKey] = this.formatPayloadValue(payloadValue);
-                });
-            }
-        });
-
-        return entries;
-    }
-
-    /**
-     * Normalize question text into a safe key
-     */
-    slugifyQuestion(question, index) {
-        if (!question) {
-            return `question_${index + 1}`;
-        }
-
-        const slug = question
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, '_')
-            .replace(/^_|_$/g, '')
-            .slice(0, 60);
-
-        return slug || `question_${index + 1}`;
-    }
-
-    /**
-     * Ensure payload entries are serializable
-     */
-    formatPayloadValue(value) {
-        if (value === undefined) {
-            return null;
-        }
-
-        if (value === null) {
-            return null;
-        }
-
-        if (typeof value === 'object') {
-            try {
-                return JSON.stringify(value);
-            } catch (error) {
-                console.warn('Failed to stringify payload value', value, error);
-                return null;
-            }
-        }
-
-        return value;
+        return Object.fromEntries(
+            Object.entries(baseData).filter(([, value]) => value !== undefined)
+        );
     }
 
     /**
