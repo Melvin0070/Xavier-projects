@@ -87,14 +87,25 @@ class MultiStepFormV4 {
      */
     generateSessionId(){
         try {
-            const memberDataSessionID = localStorage.getItem("ms_session_id");
-            if (memberDataSessionID) {
-                return memberDataSessionID;
+            if (window?.crypto?.randomUUID) {
+                return `session-${window.crypto.randomUUID()}`;
+            }
+
+            if (window?.crypto?.getRandomValues) {
+                const buffer = new Uint32Array(4);
+                window.crypto.getRandomValues(buffer);
+                const token = Array.from(buffer)
+                    .map(num => num.toString(16).padStart(8, '0'))
+                    .join('');
+                return `session-${token}`;
             }
         } catch (error) {
-            console.error("Error retrieving session_id from localStorage:", error);
+            console.error("Error generating session_id:", error);
         }
-        return null;
+
+        const timestamp = Date.now().toString(36);
+        const randomPart = Math.random().toString(36).slice(2, 11);
+        return `session-${timestamp}-${randomPart}`;
     }
 
     /**
@@ -209,9 +220,6 @@ class MultiStepFormV4 {
         
         // Generate session ID now
         this.sessionId = this.generateSessionId();
-        if (!this.sessionId) {
-            this.sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        }
 
         // Hide initial question and show main form
         this.elements.initialQuestion.style.display = 'none';
