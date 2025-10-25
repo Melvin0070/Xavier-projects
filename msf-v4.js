@@ -2,7 +2,7 @@ const CONFIG = {
     API_ENDPOINT: 'https://rjttx5p195.execute-api.eu-central-1.amazonaws.com/default/multiStep_form_Orchestrator',
     FINAL_SUBMISSION_ENDPOINT: 'https://gdi9c82r4j.execute-api.eu-west-1.amazonaws.com/moderate-test',
     POLLING_ENDPOINT: 'https://gdi9c82r4j.execute-api.eu-west-1.amazonaws.com/getitemstatus',
-    DEFAULT_BLUEPRINT: 'gtmstrategy',
+    DEFAULT_PROCESS: 'gtmstrategy',
     MAX_FILE_SIZE: 10 * 1024 * 1024, // 10MB
     UPLOAD_TIMEOUT: 30000, // 30 seconds
     POLL_INTERVAL: 5000,
@@ -33,14 +33,14 @@ class MultiStepFormV4 {
         console.log('[MultiStepFormV4] Initializing...');
         
         // Form configuration
-        this.userId = this.generateUserId();
-        this.sessionId = null; // Will be generated after initial question
-        this.blueprint = CONFIG.DEFAULT_BLUEPRINT;
+    this.userId = this.generateUserId();
+    this.sessionId = null; // Will be generated after initial question
+    this.process = CONFIG.DEFAULT_PROCESS;
         
         // Initial question data
         this.sector = null;
         this.company = null;
-        this.formId = null; // Will be set from blueprint
+    this.formId = null; // Will be set from process
         
         // Current state (simplified - backend manages step logic)
         this.currentStep = null; // Backend will set this
@@ -49,7 +49,8 @@ class MultiStepFormV4 {
         this.selectedFile = null;
         this.uploadProgress = 0;
         this.isSubmitting = false;
-        this.allAnswers = []; // Store all answers for final submission
+    this.allAnswers = []; // Store all answers for final submission fallback
+    this.finalHistory = []; // Persisted history fetched from backend
         this.pollingIntervalId = null;
         this.pollAttempts = 0;
         this.lastJobId = null;
@@ -58,7 +59,7 @@ class MultiStepFormV4 {
         this.elements = {};
         
         console.log('[MultiStepFormV4] User ID:', this.userId);
-        console.log('[MultiStepFormV4] Blueprint:', this.blueprint);
+    console.log('[MultiStepFormV4] Process:', this.process);
         
         // Initialize
         this.initializeElements();
@@ -251,7 +252,7 @@ class MultiStepFormV4 {
             const requestData = {
                 userId: this.userId,
                 sessionId: this.sessionId,
-                blueprint: this.blueprint,
+                process: this.process,
                 sector: this.sector,
                 company: this.company
             };
@@ -259,8 +260,13 @@ class MultiStepFormV4 {
             // Add answer if provided
             if (answer) {
                 requestData.answer = answer;
-                // Store answer for final submission
-                this.allAnswers.push(answer);
+                const recordedStep = this.currentStep ?? (this.allAnswers.length + 1);
+                // Store summarized answer for potential fallback usage
+                this.allAnswers.push({
+                    step: recordedStep,
+                    question: answer.question,
+                    answer: answer.payload
+                });
             }
 
             console.log('Making API call:', requestData);
@@ -317,7 +323,7 @@ class MultiStepFormV4 {
     async handleAPIResponse(response) {
         // Handle completion
         if (response.isComplete || response.message === 'Form completed successfully') {
-            this.handleFormCompletion();
+            this.handleFormCompletion(response.history || []);
             return;
         }
 
@@ -338,8 +344,9 @@ class MultiStepFormV4 {
     /**
      * Handle form completion
      */
-    async handleFormCompletion() {
+    async handleFormCompletion(history = []) {
         this.showLoading();
+        this.finalHistory = Array.isArray(history) ? history : [];
 
         try {
             const finalJobData = this.buildFinalJobData();
@@ -381,18 +388,24 @@ class MultiStepFormV4 {
      * Build final job data payload combining base fields only
      */
     buildFinalJobData() {
-        const baseData = {
-            user_id: this.userId,
-            blueprint: this.blueprint,
-            sector: this.sector,
-            company: this.company,
-            session_id: this.sessionId,
-            answers: this.allAnswers
-        };
+        const history = (this.finalHistory && this.finalHistory.length) ? this.finalHistory : this.allAnswers;
+        const sanitizedHistory = history.map((entry, index) => ({
+            step: entry?.step ?? index + 1,
+            question: entry?.question ?? '',
+            answer: entry?.answer ?? {}
+        }));
 
-        return Object.fromEntries(
-            Object.entries(baseData).filter(([, value]) => value !== undefined)
-        );
+        const companyDescriptor = this.company && this.company.trim() ? this.company.trim() : 'an unspecified company';
+        const sectorDescriptor = this.sector && this.sector.trim() ? this.sector.trim() : 'an unspecified sector';
+        const intro = `I want a strategic plan for a company ${companyDescriptor} in the sector ${sectorDescriptor}. Please take into account the following questions that were asked:`;
+        const historyJson = JSON.stringify(sanitizedHistory, null, 2);
+
+        return {
+            user_id: this.userId,
+            process: this.process,
+            session_id: this.sessionId,
+            user_prompt: `${intro}\n${historyJson}`
+        };
     }
 
     /**
